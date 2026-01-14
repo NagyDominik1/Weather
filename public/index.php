@@ -1,38 +1,58 @@
 <?php
-
 require __DIR__ . '/../vendor/autoload.php';
-
-use Slim\Factory\AppFactory;
-use Psr\Http\Message\ResponseInterface as Response;
-use Psr\Http\Message\ServerRequestInterface as Request;
-
 require __DIR__ . '/../src/Database.php';
 require __DIR__ . '/../src/WeatherService.php';
 
-$app = AppFactory::create();
+use Slim\Factory\AppFactory;
 
-/* ha nem virtual host, kell */
+$app = AppFactory::create();
 $app->setBasePath('/iws-2025-hu/Projekt-iws/public');
 
-/* JSON hibákhoz ajánlott */
-$app->addErrorMiddleware(true, true, true);
+/**
+ * HOME
+ */
+$app->get('/home', function ($request, $response) {
+    $db = Database::getConnection();
 
-/* ===== ROUTES ===== */
+    $stmt = $db->query("SELECT id, city_name FROM cities");
+    $cities = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$app->get('/', function (Request $request, Response $response): Response {
-    $response->getBody()->write('Slim OK 🚀');
+    ob_start();
+    require __DIR__ . '/../templates/home.php';
+    $html = ob_get_clean();
+
+    $response->getBody()->write($html);
+    return $response;
+});
+/**
+ * WEATHER (HTML nézet!)
+ */
+$app->get('/weather', function ($request, $response) {
+    $cityId = (int)($request->getQueryParams()['city_id'] ?? 0);
+
+    if ($cityId === 0) {
+        $response->getBody()->write('Nincs kiválasztva város');
+        return $response;
+    }
+
+    $db = Database::getConnection();
+    $service = new WeatherService($db);
+    $data = $service->fetchAndSaveWeather($cityId);
+
+    ob_start();
+    require __DIR__ . '/../templates/weather.php';
+    $html = ob_get_clean();
+
+    $response->getBody()->write($html);
     return $response;
 });
 
-$app->get('/weather/{id}', function (Request $request, Response $response, array $args): Response {
-    $db = Database::getConnection();
-    $weatherService = new WeatherService($db);
-
-    $data = $weatherService->fetchAndSaveWeather((int)$args['id']);
-
-    $response->getBody()->write(json_encode($data, JSON_UNESCAPED_UNICODE));
-
-    return $response->withHeader('Content-Type', 'application/json');
+/**
+ * ROOT (teszt)
+ */
+$app->get('/', function ($request, $response) {
+    $response->getBody()->write('Slim OK 🚀');
+    return $response;
 });
 
 $app->run();
