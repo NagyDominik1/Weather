@@ -1,68 +1,66 @@
 <?php
 
-class WeatherService
-{
-    private PDO $db;
-    private string $apiKey = '4a3ff1b88c000f9b446042147d9f14f5';
+class WeatherService {
+    private $db;
+    private $apiKey = "4a3ff1b88c000f9b446042147d9f14f5";
 
-    public function __construct(PDO $db)
-    {
+    public function __construct($db) {
         $this->db = $db;
     }
 
-    public function fetchAndSaveWeather(int $cityId): array
-    {
-        // 1️⃣ Város lekérése
-        $stmt = $this->db->prepare("SELECT lat, lon FROM cities WHERE id = ?");
-        $stmt->execute([$cityId]);
+    public function fetchAndSaveWeatherByCityName($cityName) {
+        // 1. LEKÉRÉS AZ API-BÓL
+        $url = "https://api.openweathermap.org/data/2.5/weather?q=" . urlencode($cityName) . "&units=metric&lang=hu&appid=" . $this->apiKey;
+        $response = @file_get_contents($url);
+
+        if (!$response) {
+            throw new Exception("Hiba: Város nem található vagy API hiba.");
+        }
+
+        $data = json_decode($response, true);
+
+        // 2. VÁROS KERESÉSE VAGY LÉTREHOZÁSA
+        $stmt = $this->db->prepare("SELECT id FROM cities WHERE city_name = ? LIMIT 1");
+        $stmt->execute([$cityName]);
         $city = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$city) {
-            throw new Exception('City not found');
+            // Ha kitörölted a DB-t, itt szúrjuk be újra automatikusan
+            $insertCity = $this->db->prepare("INSERT INTO cities (city_name, country, lat, lon) VALUES (?, ?, ?, ?)");
+            $insertCity->execute([
+                $data['name'],
+                $data['sys']['country'],
+                $data['coord']['lat'],
+                $data['coord']['lon']
+            ]);
+            $cityId = $this->db->lastInsertId();
+        } else {
+            $cityId = $city['id'];
+            // Ha már benne volt, frissítjük a koordinátákat
+            $updateCity = $this->db->prepare("UPDATE cities SET lat = ?, lon = ?, country = ? WHERE id = ?");
+            $updateCity->execute([$data['coord']['lat'], $data['coord']['lon'], $data['sys']['country'], $cityId]);
         }
 
-        // 2️⃣ API URL
-        $url = "https://api.openweathermap.org/data/2.5/weather"
-            . "?lat={$city['lat']}&lon={$city['lon']}"
-            . "&appid={$this->apiKey}&units=metric";
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 10
-        ]);
-
-        $responseJson = curl_exec($ch);
-        curl_close($ch);
-
-        $response = json_decode($responseJson, true);
-
-        if (!isset($response['main'])) {
-            throw new Exception('Invalid API response');
-        }
-
-        // 3️⃣ Mentés adatbázisba (MEZŐK EGYEZNEK!)
-        $stmt = $this->db->prepare("
-            INSERT INTO weather_data
-            (city_id, temperature, feels_like, humidity, wind_speed, description, icon, pressure, visibility, clouds, sunrise, sunset, dt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), NOW())
+        // 3. ÚJ REKORD A WEATHER_DATA TÁBLÁBA
+        $insertWeather = $this->db->prepare("
+            INSERT INTO weather_data 
+            (city_id, temperature, feels_like, humidity, wind_speed, description, icon, dt) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
         ");
-
-        $stmt->execute([
+        $insertWeather->execute([
             $cityId,
-            $response['main']['temp'] ?? null,
-            $response['main']['feels_like'] ?? null,
-            $response['main']['humidity'] ?? null,
-            $response['wind']['speed'] ?? null,
-            $response['weather'][0]['description'] ?? null,
-            $response['weather'][0]['icon'] ?? null,
-            $response['main']['pressure'] ?? null,
-            $response['visibility'] ?? null,
-            $response['clouds']['all'] ?? null,
-            $response['sys']['sunrise'] ?? null,
-            $response['sys']['sunset'] ?? null
+            $data['main']['temp'],
+            $data['main']['feels_like'],
+            $data['main']['humidity'],
+            $data['wind']['speed'],
+            $data['weather'][0]['description'],
+            $data['weather'][0]['icon']
         ]);
 
-        return $response;
+        // Visszaadjuk az API adatot ÉS a belső ID-t is!
+        return [
+            'api_data' => $data,
+            'city_id' => $cityId
+        ];
     }
 }
