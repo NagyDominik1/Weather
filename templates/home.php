@@ -1,94 +1,138 @@
+<?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+include __DIR__ . '/lang.php';
+
+// Dinamikus bázis útvonal meghatározása
+$basePath = rtrim(str_replace('/index.php', '', $_SERVER['SCRIPT_NAME']), '/');
+
+// Biztonsági ellenőrzés a kedvencekhez
+if (!isset($favorites)) { $favorites = []; }
+?>
 <!DOCTYPE html>
-<html lang="hu">
+<html lang="<?php echo $lang; ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Időjárás - Főoldal</title>
+    <title><?php echo t('app_name'); ?> - <?php echo t('nav_home'); ?></title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <link rel="manifest" href="<?php echo $basePath; ?>/manifest.json">
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a">
+
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WeatherBase">
+
+    <link rel="apple-touch-icon" href="<?php echo $basePath; ?>/icons/apple-touch-icon.png">
+    <meta name="msapplication-TileImage" content="<?php echo $basePath; ?>/icons/web-app-manifest-192x192.png">
+    <meta name="msapplication-TileColor" content="#3b82f6">
+    <?php include __DIR__ . '/dark-mode-styles.php'; ?>
 </head>
-<body class="bg-slate-50 flex min-h-screen text-slate-800">
+<body class="bg-slate-50 flex min-h-screen">
 
-<aside class="w-72 bg-white border-r border-slate-200 flex flex-col hidden md:flex shrink-0 h-screen sticky top-0">
-    <div class="p-8">
-        <h2 class="text-blue-600 text-2xl font-black flex items-center gap-2">
-            <i class="fa-solid fa-bolt-lightning"></i> WEATHER.IO
-        </h2>
-    </div>
+<?php include __DIR__ . '/sidebar_smart.php'; ?>
 
-    <nav class="flex-1 px-4 space-y-1">
-        <a href="/iws-2025-hu/Projekt-iws/public/"
-           class="flex items-center gap-3 p-3 bg-blue-50 text-blue-600 rounded-2xl font-bold transition">
-            <i class="fa-solid fa-house"></i> Irányítópult
-        </a>
-
-        <?php if (isset($_SESSION['user_id'])): ?>
-            <a href="/iws-2025-hu/Projekt-iws/public/favorites"
-               class="flex items-center gap-3 p-3 text-slate-500 hover:bg-slate-50 rounded-2xl transition group">
-                <i class="fa-solid fa-star group-hover:text-yellow-500 transition"></i> Kedvenc városok
-                <span class="ml-auto bg-slate-100 text-slate-500 text-xs py-1 px-2 rounded-lg">
-                    <?= isset($favorites) ? count($favorites) : 0 ?>
-                </span>
-            </a>
-
-            <a href="/iws-2025-hu/Projekt-iws/public/archive"
-               class="flex items-center gap-3 p-3 text-slate-500 hover:bg-slate-50 rounded-2xl transition group">
-                <i class="fa-solid fa-clock-rotate-left group-hover:text-blue-500 transition"></i> Archívum
-            </a>
-
-            <div class="pt-4 mt-4 border-t border-slate-100 px-3">
-                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Felhasználó</p>
-                <div class="flex items-center gap-2 text-slate-700 text-sm mb-3 font-medium">
-                    <i class="fa-solid fa-circle-user text-blue-400 text-lg"></i>
-                    <?= htmlspecialchars($_SESSION['email']) ?>
-                </div>
-                <a href="/iws-2025-hu/Projekt-iws/public/logout"
-                   class="flex items-center gap-3 p-2 text-red-500 hover:bg-red-50 rounded-xl transition text-sm font-bold">
-                    <i class="fa-solid fa-right-from-bracket"></i> Kijelentkezés
-                </a>
-            </div>
-
-        <?php else: ?>
-            <div class="pt-4 mt-4 border-t border-slate-100 px-3">
-                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Fiók</p>
-                <a href="/iws-2025-hu/Projekt-iws/public/login"
-                   class="flex items-center gap-3 p-3 text-slate-500 hover:bg-slate-50 rounded-2xl transition group">
-                    <i class="fa-solid fa-key group-hover:text-blue-500"></i> Bejelentkezés
-                </a>
-                <a href="/iws-2025-hu/Projekt-iws/public/register"
-                   class="flex items-center gap-3 p-3 text-slate-500 hover:bg-slate-50 rounded-2xl transition group">
-                    <i class="fa-solid fa-user-plus group-hover:text-green-500"></i> Regisztráció
-                </a>
-            </div>
-        <?php endif; ?>
-    </nav>
-</aside>
-
-<main class="flex-1 p-8">
+<main class="flex-1 p-6 md:p-10 pb-32 md:pb-10">
     <div class="max-w-4xl mx-auto">
 
-        <div class="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 mb-12">
-            <h1 class="text-4xl font-black text-slate-900 mb-2">Hogy van az idő?</h1>
-            <p class="text-slate-400 mb-8">Válassz ki egy várost a listából.</p>
+        <header class="mb-12 text-center">
+            <h1 class="text-5xl md:text-6xl font-black text-slate-900 mb-4">
+                <?php echo t('home_title'); ?> ☀️
+            </h1>
+            <p class="text-xl text-slate-600 italic">
+                <?php echo t('home_subtitle'); ?>
+            </p>
+        </header>
 
-            <form action="/iws-2025-hu/Projekt-iws/public/weather" method="get" class="flex flex-col md:flex-row gap-4">
-                <div class="relative flex-1">
+        <div class="bg-white rounded-[3rem] p-8 md:p-12 shadow-2xl border border-slate-100 mb-12">
+            <form action="<?php echo $basePath; ?>/weather" method="get" class="space-y-6">
+                <div>
+                    <label class="block text-sm font-bold text-slate-600 mb-3 uppercase tracking-wider">
+                        <i class="fa-solid fa-magnifying-glass mr-2 text-blue-600"></i> <?php echo t('home_search_label'); ?>
+                    </label>
                     <input
                             type="text"
                             name="city_name"
-                            placeholder="Írd be a város nevét (pl. Budapest, London...)"
                             required
-                            class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-lg focus:ring-4 focus:ring-blue-100 outline-none transition"
+                            placeholder="<?php echo t('home_search_placeholder'); ?>"
+                            class="w-full p-6 text-xl rounded-2xl border-2 border-slate-200 hover:border-blue-400 focus:border-blue-600 transition outline-none font-medium"
                     >
-                    <i class="fa-solid fa-magnifying-glass absolute right-5 top-1/2 -translate-y-1/2 text-slate-300"></i>
                 </div>
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-10 py-4 rounded-2xl shadow-xl shadow-blue-100 transition-all active:scale-95">
-                    Mehet
+                <button
+                        type="submit"
+                        class="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white py-6 rounded-2xl font-black text-lg hover:shadow-2xl hover:scale-[1.02] transition-all duration-300"
+                >
+                    <i class="fa-solid fa-cloud-sun mr-3"></i> <?php echo t('home_search_btn'); ?>
                 </button>
             </form>
         </div>
 
+        <?php if (isset($_SESSION['user_id']) && !empty($favorites)): ?>
+            <div class="bg-white dark:bg-slate-800 rounded-3xl p-8 shadow-lg border border-slate-100 dark:border-slate-700 mb-12">
+                <h2 class="text-2xl font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3">
+                    <i class="fa-solid fa-star text-yellow-500"></i> <?php echo t('home_favorites_title'); ?>
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <?php foreach (array_slice($favorites, 0, 6) as $fav): ?>
+                        <a href="<?php echo $basePath; ?>/weather?city_name=<?php echo urlencode($fav['city_name']); ?>"
+                           class="p-5 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900 dark:to-cyan-900 rounded-2xl border-2 border-blue-100 dark:border-blue-500 hover:border-blue-400 dark:hover:border-blue-400 transition group">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <i class="fa-solid fa-city text-2xl text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform"></i>
+                                    <span class="font-bold text-slate-900 dark:text-white text-lg"><?php echo htmlspecialchars($fav['city_name']); ?></span>
+                                </div>
+                                <i class="fa-solid fa-arrow-right text-blue-600 dark:text-blue-400 group-hover:translate-x-1 transition-transform"></i>
+                            </div>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <a href="<?php echo $basePath; ?>/archive" class="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group">
+                <div class="bg-purple-100 w-16 h-16 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-clock-rotate-left text-3xl text-purple-600"></i>
+                </div>
+                <h3 class="text-xl font-black text-slate-900 mb-2"><?php echo t('nav_archive'); ?></h3>
+                <p class="text-sm text-slate-600"><?php echo t('archive_subtitle'); ?></p>
+            </a>
+
+            <a href="<?php echo $basePath; ?>/alerts" class="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group">
+                <div class="bg-red-100 w-16 h-16 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-bell text-3xl text-red-600"></i>
+                </div>
+                <h3 class="text-xl font-black text-slate-900 mb-2"><?php echo t('nav_alerts'); ?></h3>
+                <p class="text-sm text-slate-600">Aktuális riasztások és figyelmeztetések.</p>
+            </a>
+
+            <a href="<?php echo $basePath; ?>/compare" class="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group">
+                <div class="bg-green-100 w-16 h-16 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-code-compare text-3xl text-green-600"></i>
+                </div>
+                <h3 class="text-xl font-black text-slate-900 mb-2"><?php echo t('nav_compare'); ?></h3>
+                <p class="text-sm text-slate-600">Városok időjárásának összehasonlítása.</p>
+            </a>
+        </div>
+
     </div>
 </main>
+
+<?php include __DIR__ . '/mobile_nav.php'; ?>
+
+<script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('<?php echo $basePath; ?>/js/service-worker.js')
+                .then((reg) => console.log('✅ Service Worker OK'))
+                .catch((err) => console.warn('❌ SW Hiba:', err));
+        });
+    }
+</script>
 </body>
 </html>
