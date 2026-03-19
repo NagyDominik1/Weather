@@ -19,6 +19,7 @@ class ComposerStaticInit026509606a55be5c56c243e48adc6597
         ),
         'P' => 
         array (
+            'Psr\\SimpleCache\\' => 16,
             'Psr\\Log\\' => 8,
             'Psr\\Http\\Server\\' => 16,
             'Psr\\Http\\Message\\' => 17,
@@ -34,6 +35,10 @@ class ComposerStaticInit026509606a55be5c56c243e48adc6597
             'Fig\\Http\\Message\\' => 17,
             'FastRoute\\' => 10,
         ),
+        'D' => 
+        array (
+            'Detection\\' => 10,
+        ),
     );
 
     public static $prefixDirsPsr4 = array (
@@ -44,6 +49,10 @@ class ComposerStaticInit026509606a55be5c56c243e48adc6597
         'Slim\\' => 
         array (
             0 => __DIR__ . '/..' . '/slim/slim/Slim',
+        ),
+        'Psr\\SimpleCache\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/psr/simple-cache/src',
         ),
         'Psr\\Log\\' => 
         array (
@@ -78,6 +87,10 @@ class ComposerStaticInit026509606a55be5c56c243e48adc6597
         'FastRoute\\' => 
         array (
             0 => __DIR__ . '/..' . '/nikic/fast-route/src',
+        ),
+        'Detection\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/mobiledetect/mobiledetectlib/src',
         ),
     );
 

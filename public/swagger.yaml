@@ -1,0 +1,436 @@
+openapi: 3.0.0
+info:
+  title: WeatherBase API
+  description: |
+    WeatherBase időjárás alkalmazás REST API dokumentáció.
+    
+    ## Funkciók
+    - Felhasználó autentikáció (login, register, logout)
+    - Időjárás lekérés városokra
+    - Kedvenc városok kezelése (CRUD)
+    
+    ## Autentikáció
+    A legtöbb endpoint session-alapú autentikációt használ. 
+    Először hívd meg a `/api/login` endpoint-ot, amely beállítja a PHPSESSID cookie-t.
+
+  version: 1.0.0
+  contact:
+    name: WeatherBase Support
+    email: kecske1588@gmail.com
+
+servers:
+  - url: https://ee.stud.vts.su.ac.rs/iws-2025-hu/Projekt-iws/public
+    description: Production server
+  - url: http://localhost/iws-2025-hu/Projekt-iws/public
+    description: Development server (XAMPP)
+
+tags:
+  - name: Authentication
+    description: Bejelentkezés, regisztráció, kijelentkezés
+  - name: Weather
+    description: Időjárás lekérés
+  - name: Favorites
+    description: Kedvenc városok kezelése
+
+paths:
+  /api/login:
+    post:
+      tags:
+        - Authentication
+      summary: Bejelentkezés
+      description: Felhasználó bejelentkeztetése email és jelszó alapján. Sikeres bejelentkezés esetén session cookie-t állít be.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: kecske1588@gmail.com
+                password:
+                  type: string
+                  format: password
+                  example: kecske
+      responses:
+        '200':
+          description: Sikeres bejelentkezés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Login successful
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 10
+                      email:
+                        type: string
+                        example: kecske1588@gmail.com
+                  session_id:
+                    type: string
+                    example: abc123def456
+        '400':
+          description: Hiányzó email vagy jelszó
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Hibás email vagy jelszó
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/register:
+    post:
+      tags:
+        - Authentication
+      summary: Regisztráció
+      description: Új felhasználó regisztrálása. Aktiválási email-t küld a megadott címre.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: test@example.com
+                password:
+                  type: string
+                  format: password
+                  example: testpassword123
+      responses:
+        '201':
+          description: Sikeres regisztráció
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Registration successful. Please activate your account via email.
+                  activation_required:
+                    type: boolean
+                    example: true
+        '400':
+          description: Hiányzó email vagy jelszó
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Email már létezik
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Kijelentkezés
+      description: Felhasználó kijelentkeztetése, session törlése.
+      responses:
+        '200':
+          description: Sikeres kijelentkezés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Logged out successfully
+
+  /api/weather:
+    get:
+      tags:
+        - Weather
+      summary: Időjárás lekérés
+      description: Aktuális időjárás lekérése városnév alapján az OpenWeather API-ból.
+      parameters:
+        - name: city_name
+          in: query
+          required: true
+          schema:
+            type: string
+            example: Budapest
+          description: A város neve
+      responses:
+        '200':
+          description: Sikeres időjárás lekérés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  city_id:
+                    type: integer
+                    example: 22
+                  city_name:
+                    type: string
+                    example: Budapest
+                  weather:
+                    type: object
+                    properties:
+                      main:
+                        type: object
+                        properties:
+                          temp:
+                            type: number
+                            example: 18.5
+                          feels_like:
+                            type: number
+                            example: 17.2
+                          humidity:
+                            type: integer
+                            example: 65
+                      wind:
+                        type: object
+                        properties:
+                          speed:
+                            type: number
+                            example: 3.5
+                      weather:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            description:
+                              type: string
+                              example: tiszta égbolt
+                            icon:
+                              type: string
+                              example: 01d
+        '400':
+          description: Hiányzó város név
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Szerver hiba vagy város nem található
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/favorites:
+    get:
+      tags:
+        - Favorites
+      summary: Kedvenc városok listája
+      description: Bejelentkezett felhasználó kedvenc városainak lekérése.
+      security:
+        - sessionAuth: []
+      responses:
+        '200':
+          description: Sikeres lekérés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  favorites:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          example: 22
+                        city_name:
+                          type: string
+                          example: Budapest
+                        created_at:
+                          type: string
+                          format: date-time
+                          example: '2025-03-12 10:30:00'
+                  count:
+                    type: integer
+                    example: 1
+        '401':
+          description: Nincs bejelentkezve
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/favorite/add:
+    post:
+      tags:
+        - Favorites
+      summary: Kedvenc város hozzáadása
+      description: Új város hozzáadása a felhasználó kedvenceihez.
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - city_id
+              properties:
+                city_id:
+                  type: integer
+                  example: 22
+      responses:
+        '200':
+          description: Sikeres hozzáadás
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Favorite added
+        '400':
+          description: Hiányzó city_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Nincs bejelentkezve
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/favorite/remove:
+    post:
+      tags:
+        - Favorites
+      summary: Kedvenc város törlése (POST)
+      description: Város törlése a kedvencek közül POST metódussal.
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - city_id
+              properties:
+                city_id:
+                  type: integer
+                  example: 22
+      responses:
+        '200':
+          description: Sikeres törlés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Favorite removed
+        '401':
+          description: Nincs bejelentkezve
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/favorite/{id}:
+    delete:
+      tags:
+        - Favorites
+      summary: Kedvenc város törlése (DELETE)
+      description: Város törlése a kedvencek közül DELETE HTTP metódussal.
+      security:
+        - sessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 22
+          description: Város ID
+      responses:
+        '200':
+          description: Sikeres törlés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Favorite removed successfully
+        '401':
+          description: Nincs bejelentkezve
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: Error message
+
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: PHPSESSID
+      description: Session-based authentication using PHP session cookie

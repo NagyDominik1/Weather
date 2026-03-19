@@ -8,26 +8,60 @@ require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/WeatherService.php';
 require_once __DIR__ . '/../src/EmailService.php';
 require_once __DIR__ . '/../src/WeatherNotificationService.php';
+require_once __DIR__ . '/../src/VisitorTracker.php';
 
 use Slim\Factory\AppFactory;
 
 $app = AppFactory::create();
 
-$app = AppFactory::create();
+/*
+// Visitor tracking minden kérésnél
+try {
+    $db = Database::getConnection();
+    $tracker = new VisitorTracker($db);
+    $tracker->trackVisitor();
+} catch (Exception $e) {
+    // Csendben kezeljük a hibát, ne zavarja meg a felhasználót
+    error_log("Tracking error: " . $e->getMessage());
+}*/
 
 /**
  * AUTOMATIKUS BÁZIS ÚTVONAL FELISMERÉS ✅
- * Ez működik XAMPP-on és az egyetemi szerveren is.
  */
 $scriptName = $_SERVER['SCRIPT_NAME']; // pl. /iws-2025-hu/Projekt-iws/public/index.php
+$requestUri = $_SERVER['REQUEST_URI']; // pl. /iws-2025-hu/Projekt-iws/public/compare?city1=budapest
 $basePath = str_replace('/index.php', '', $scriptName);
 
-// Ha a basePath nem üres (tehát almappában vagyunk, mint a XAMPP-on vagy a stud szerveren)
+// DEBUG - csak fejlesztéshez, később töröld!
+error_log("SCRIPT_NAME: " . $scriptName);
+error_log("REQUEST_URI: " . $requestUri);
+error_log("BASE PATH: " . $basePath);
+
 if (!empty($basePath)) {
     $app->setBasePath($basePath);
 }
 
 $app->addBodyParsingMiddleware();
+
+/**
+ * Admin jogosultság ellenőrzés middleware
+ */
+function requireAdmin($response) {
+    if (!isset($_SESSION['user_id'])) {
+        return $response->withHeader('Location', '../login')->withStatus(302);
+    }
+
+    $db = Database::getConnection();
+    $stmt = $db->prepare("SELECT is_admin FROM users WHERE id = ?");
+    $stmt->execute([$_SESSION['user_id']]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$user || !$user['is_admin']) {
+        return $response->withHeader('Location', '../')->withStatus(302);
+    }
+
+    return null;
+}
 
 $app->get('/', function ($request, $response) {
     $db = Database::getConnection();
@@ -65,38 +99,27 @@ $app->get('/weather', function ($request, $response) {
     $userId = $_SESSION['user_id'] ?? null;
     $currentLang = $_COOKIE['language'] ?? $_SESSION['language'] ?? 'hu';
 
-    // --- VENDÉG LIMIT ELLENŐRZÉSE (MAX 3 VÁROS) ---
     if (!$userId) {
-        // Ha még nincs a sessionben a listánk, létrehozzuk
         if (!isset($_SESSION['guest_history'])) {
             $_SESSION['guest_history'] = [];
         }
 
-        // Ha ez egy ÚJ város (nincs még a 3-as listában)
         if (!in_array($cityName, $_SESSION['guest_history'])) {
-            // Megnézzük, teli van-e már a lista
             if (count($_SESSION['guest_history']) >= 3) {
-                // Ha igen, irány a login, egy hibaüzenettel
                 return $response->withHeader('Location', './login?error=limit_reached')->withStatus(302);
             }
-            // Ha nincs teli, hozzáadjuk a várost a történethez
             $_SESSION['guest_history'][] = $cityName;
         }
     }
-    // --- LIMIT VÉGE ---
 
     try {
-        // IDŐJÁRÁS + MENTÉS
         $result = $service->fetchAndSaveWeatherByCityName($cityName, $currentLang, $userId);
 
-        // ✅ A te kódod folytatása változatlanul...
-        $data   = $result['api_data'] ?? $result['data']; // Figyelj a kulcsra, amit a Service ad vissza!
+        $data   = $result['api_data'] ?? $result['data'];
         $cityId = $result['city_id'];
 
-        // ELŐREJELZÉS
         $forecast = $service->getForecast($cityName, $currentLang);
 
-        // ÖLTÖZKÖDÉSI AJÁNLÁS
         $temp = (float)($data['main']['temp'] ?? 0);
         $recommendation = $service->getOutfitRecommendation($temp, $currentLang);
 
@@ -127,6 +150,7 @@ $app->get('/weather', function ($request, $response) {
     $response->getBody()->write($html);
     return $response;
 });
+
 $app->post('/favorite/add', function ($request, $response) {
     $cityId = $request->getParsedBody()['city_id'] ?? null;
     $userId = $_SESSION['user_id'] ?? null;
@@ -178,6 +202,166 @@ $app->get('/favorites', function ($request, $response) {
     return $response;
 });
 
+$app->get('/api/favorites', function ($request, $response) {
+    try {
+        $db = Database::getConnection();
+        $userId = $_SESSION['user_id'] ?? null;
+
+        if (!$userId) {
+            $response->getBody()->write(json_encode([
+                'error' => 'Not logged in',
+                'logged_in' => false
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(401);
+        }
+
+        $favStmt = $db->prepare("
+            SELECT c.city_name, c.id, f.created_at
+            FROM favorite_cities f 
+            JOIN cities c ON f.city_id = c.id 
+            WHERE f.user_id = ?
+            ORDER BY f.created_at DESC
+        ");
+        $favStmt->execute([$userId]);
+        $favorites = $favStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $response->getBody()->write(json_encode([
+            'success' => true,
+            'favorites' => $favorites,
+            'count' => count($favorites)
+        ]));
+
+        return $response->withHeader('Content-Type', 'application/json');
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode([
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
+$app->get('/api/weather', function ($request, $response) {
+    try {
+        $cityName = $request->getQueryParams()['city_name'] ?? null;
+
+        if (!$cityName) {
+            $response->getBody()->write(json_encode(['error' => 'City name required']));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        $db = Database::getConnection();
+        $service = new WeatherService($db);
+        $userId = $_SESSION['user_id'] ?? null;
+        $currentLang = $_COOKIE['language'] ?? 'hu';
+
+        $result = $service->fetchAndSaveWeatherByCityName($cityName, $currentLang, $userId);
+
+        $data = $result['api_data'] ?? $result['data'];
+        $cityId = $result['city_id'];
+
+        $response->getBody()->write(json_encode([
+            'success' => true,
+            'city_id' => $cityId,
+            'city_name' => $data['name'] ?? $cityName,
+            'weather' => $data
+        ]));
+
+        return $response->withHeader('Content-Type', 'application/json');
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode([
+            'error' => $e->getMessage()
+        ]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
+$app->post('/api/favorite/add', function ($request, $response) {
+    try {
+        $cityId = $request->getParsedBody()['city_id'] ?? null;
+        $userId = $_SESSION['user_id'] ?? null;
+
+        if (!$userId) {
+            $response->getBody()->write(json_encode(['error' => 'Not logged in']));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(401);
+        }
+
+        if (!$cityId) {
+            $response->getBody()->write(json_encode(['error' => 'City ID required']));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        $db = Database::getConnection();
+        $stmt = $db->prepare("INSERT IGNORE INTO favorite_cities (user_id, city_id, created_at) VALUES (?, ?, NOW())");
+        $stmt->execute([$userId, $cityId]);
+
+        $response->getBody()->write(json_encode([
+            'success' => true,
+            'message' => 'Favorite added'
+        ]));
+
+        return $response->withHeader('Content-Type', 'application/json');
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode(['error' => $e->getMessage()]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
+$app->post('/api/favorite/remove', function ($request, $response) {
+    try {
+        $cityId = $request->getParsedBody()['city_id'] ?? null;
+        $userId = $_SESSION['user_id'] ?? null;
+
+        if (!$userId) {
+            $response->getBody()->write(json_encode(['error' => 'Not logged in']));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(401);
+        }
+
+        if (!$cityId) {
+            $response->getBody()->write(json_encode(['error' => 'City ID required']));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        $db = Database::getConnection();
+        $stmt = $db->prepare("DELETE FROM favorite_cities WHERE user_id = ? AND city_id = ?");
+        $stmt->execute([$userId, $cityId]);
+
+        $response->getBody()->write(json_encode([
+            'success' => true,
+            'message' => 'Favorite removed'
+        ]));
+
+        return $response->withHeader('Content-Type', 'application/json');
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode(['error' => $e->getMessage()]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
 $app->post('/register', function ($request, $response) {
     $params = $request->getParsedBody();
     $email = filter_var($params['email'], FILTER_SANITIZE_EMAIL);
@@ -187,21 +371,16 @@ $app->post('/register', function ($request, $response) {
 
     $db = Database::getConnection();
 
-    // Regisztráció mentése (inaktívként: is_active = 0)
     $stmt = $db->prepare("INSERT INTO users (email, password, activation_code, is_active) VALUES (?, ?, ?, 0)");
 
     if ($stmt->execute([$email, $hashedPassword, $activationCode])) {
-        // MEHET AZ EMAIL KÜLDÉS
         try {
             $sent = EmailService::sendActivationEmail($email, $activationCode);
             if (!$sent) {
-                // Ha a függvény false-t ad vissza
                 throw new Exception("A Mailer hiba nélkül tért vissza, de nem küldte el.");
             }
-            // Ha sikerült, irány a login üzenettel
             return $response->withHeader('Location', 'login?message=check_email')->withStatus(302);
         } catch (Exception $e) {
-            // HA HIBA VAN, ÍRJA KI A KÉPERNYŐRE!
             $response->getBody()->write("<h1>Email hiba történt!</h1>");
             $response->getBody()->write("<p>Üzenet: " . $e->getMessage() . "</p>");
             $response->getBody()->write("<p>A felhasználó létrejött, de aktiválni kell az adatbázisban manuálisan.</p>");
@@ -210,17 +389,15 @@ $app->post('/register', function ($request, $response) {
     }
     return $response;
 });
-// index.php - részlet
+
 $app->get('/activate', function ($request, $response) {
     $code = $request->getQueryParams()['code'] ?? null;
     $db = Database::getConnection();
 
-    // 1. Megnézzük, létezik-e a kód
     $stmt = $db->prepare("UPDATE users SET is_active = 1, activation_code = NULL WHERE activation_code = ?");
     $stmt->execute([$code]);
 
     if ($stmt->rowCount() > 0) {
-        // SIKER! Írassunk ki valamit, hogy ne legyen üres az oldal
         $response->getBody()->write("<h1>Sikeres aktiválás!</h1><p>Most már bejelentkezhetsz.</p><a href='login'>Tovább a bejelentkezéshez</a>");
         return $response;
     } else {
@@ -228,19 +405,18 @@ $app->get('/activate', function ($request, $response) {
         return $response;
     }
 });
+
 $app->get('/archive', function ($request, $response) {
     if (!isset($_SESSION['user_id'])) {
         return $response->withHeader('Location', './login')->withStatus(302);
     }
 
-    // City translator betöltése
     require_once __DIR__ . '/../helpers/CityTranslator.php';
 
     $db = Database::getConnection();
     $cityId = $request->getQueryParams()['city_id'] ?? null;
     $dateFrom = $request->getQueryParams()['date_from'] ?? null;
 
-    // Aktuális nyelv
     $lang = $_COOKIE['language'] ?? $_SESSION['language'] ?? 'hu';
 
     $query = "SELECT wd.*, c.city_name 
@@ -263,27 +439,23 @@ $app->get('/archive', function ($request, $response) {
     $stmt->execute($params);
     $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // VÁROSOK LEKÉRÉSE - nyelv szerint szűrve
     $allCities = $db->query("
         SELECT DISTINCT city_name 
         FROM cities 
         ORDER BY city_name ASC
     ")->fetchAll(PDO::FETCH_COLUMN);
 
-    // Fordítás + deduplikáció
     $translatedCities = [];
     foreach ($allCities as $cityName) {
         $translated = translateCityName($cityName, $lang);
         if (!isset($translatedCities[$translated])) {
-            $translatedCities[$translated] = $cityName; // Eredeti név tárolása
+            $translatedCities[$translated] = $cityName;
         }
     }
 
-    // Rendezés és átalakítás tömbbé
     ksort($translatedCities);
     $cities = [];
     foreach ($translatedCities as $displayName => $originalName) {
-        // ID lekérése az eredeti névhez
         $stmt = $db->prepare("SELECT MIN(id) as id FROM cities WHERE city_name = ?");
         $stmt->execute([$originalName]);
         $cityId = $stmt->fetchColumn();
@@ -431,7 +603,6 @@ $app->get('/alerts', function ($request, $response) {
         foreach ($allAlerts as $alert) {
             $type = strtolower($alert['alert_type'] ?? 'info');
 
-            // Ha a típus 'vészhelyzet', 'hőség', 'vihar' stb, akkor próbáljuk besorolni
             if (strpos($type, 'danger') !== false || strpos($type, 'vész') !== false || strpos($type, 'hőség') !== false) {
                 $alerts['danger'][] = $alert;
             } elseif (strpos($type, 'warning') !== false || strpos($type, 'figyelmeztetés') !== false || strpos($type, 'eső') !== false) {
@@ -458,6 +629,8 @@ $app->get('/compare', function ($request, $response) {
 
     $db = Database::getConnection();
     $service = new WeatherService($db);
+    $userId = $_SESSION['user_id'] ?? null;
+    $currentLang = $_COOKIE['language'] ?? $_SESSION['language'] ?? 'hu';
 
     $city1 = $request->getQueryParams()['city1'] ?? null;
     $city2 = $request->getQueryParams()['city2'] ?? null;
@@ -470,16 +643,21 @@ $app->get('/compare', function ($request, $response) {
         $cityNames = array_filter([$city1, $city2, $city3]);
         foreach ($cityNames as $cityName) {
             try {
-                $result = $service->fetchAndSaveWeatherByCityName(trim($cityName));
+                // ✅ NYELV ÉS USER_ID PARAMÉTEREK HOZZÁADVA
+                $result = $service->fetchAndSaveWeatherByCityName(trim($cityName), $currentLang, $userId);
+
+                // ✅ KULCS JAVÍTVA: 'data' ÉS 'api_data' IS TÁMOGATVA
+                $data = $result['api_data'] ?? $result['data'];
+
                 $compareData[] = [
-                    'name' => $result['api_data']['name'],
-                    'temp' => $result['api_data']['main']['temp'],
-                    'feels_like' => $result['api_data']['main']['feels_like'],
-                    'humidity' => $result['api_data']['main']['humidity'],
-                    'wind_speed' => $result['api_data']['wind']['speed'],
-                    'pressure' => $result['api_data']['main']['pressure'],
-                    'description' => $result['api_data']['weather'][0]['description'],
-                    'icon' => $result['api_data']['weather'][0]['icon']
+                    'name' => $data['name'],
+                    'temp' => $data['main']['temp'],
+                    'feels_like' => $data['main']['feels_like'],
+                    'humidity' => $data['main']['humidity'],
+                    'wind_speed' => $data['wind']['speed'],
+                    'pressure' => $data['main']['pressure'],
+                    'description' => $data['weather'][0]['description'],
+                    'icon' => $data['weather'][0]['icon']
                 ];
             } catch (Exception $e) {
                 $error = "Hiba a város lekérésekor: " . htmlspecialchars($cityName);
@@ -488,7 +666,6 @@ $app->get('/compare', function ($request, $response) {
     }
 
     ob_start();
-    // Itt adjuk át a változókat a sablonnak
     require __DIR__ . '/../templates/compare.php';
     $html = ob_get_clean();
     $response->getBody()->write($html);
@@ -595,9 +772,6 @@ $app->get('/settings', function ($request, $response) {
     return $response;
 });
 
-/**
- * BEÁLLÍTÁSOK MENTÉSE - JAVÍTOTT ✅
- */
 $app->post('/settings/save', function ($request, $response) {
     if (!isset($_SESSION['user_id'])) {
         return $response->withHeader('Location', './login')->withStatus(302);
@@ -607,12 +781,10 @@ $app->post('/settings/save', function ($request, $response) {
     $userId = $_SESSION['user_id'];
     $db = Database::getConnection();
 
-    // Mértékegységek
     $_SESSION['temp_unit'] = $params['temp_unit'] ?? 'celsius';
     $_SESSION['wind_unit'] = $params['wind_unit'] ?? 'ms';
     $_SESSION['pressure_unit'] = $params['pressure_unit'] ?? 'hpa';
 
-    // Értesítések
     $notifyEmail = isset($params['notify_email']) ? 1 : 0;
     $notifyPush = isset($params['notify_push']) ? 1 : 0;
     $notifyAlerts = isset($params['notify_alerts']) ? 1 : 0;
@@ -623,7 +795,6 @@ $app->post('/settings/save', function ($request, $response) {
     $_SESSION['notify_alerts'] = $notifyAlerts;
     $_SESSION['notify_daily'] = $notifyDaily;
 
-    // ADATBÁZISBA MENTÉS!
     try {
         $stmt = $db->prepare("
             UPDATE users 
@@ -644,14 +815,12 @@ $app->post('/settings/save', function ($request, $response) {
         error_log("Értesítések mentési hiba: " . $e->getMessage());
     }
 
-    // Megjelenés
     $theme = $params['theme'] ?? 'light';
     $_SESSION['theme'] = $theme;
     setcookie('theme', $theme, time() + (30 * 24 * 60 * 60), '/');
 
     $_SESSION['animations'] = isset($params['animations']) ? 1 : 0;
 
-    // Nyelv és régió
     $language = $params['language'] ?? 'hu';
     $_SESSION['language'] = $language;
     $_SESSION['timezone'] = $params['timezone'] ?? 'Europe/Budapest';
@@ -661,9 +830,6 @@ $app->post('/settings/save', function ($request, $response) {
     return $response->withHeader('Location', '/iws-2025-hu/Projekt-iws/public/settings?success=saved')->withStatus(302);
 });
 
-/**
- * TESZT ENDPOINT
- */
 $app->get('/test-notification', function ($request, $response) {
     if (!isset($_SESSION['user_id'])) {
         $response->getBody()->write("❌ Hiba: Előbb jelentkezz be! <a href='./login'>Login</a>");
@@ -747,6 +913,260 @@ $app->get('/test-notification', function ($request, $response) {
     return $response;
 });
 
+$app->get('/admin', function ($request, $response) {
+    $check = requireAdmin($response);
+    if ($check) return $check;
 
+    $userId = $_SESSION['user_id'];
+
+    ob_start();
+    require __DIR__ . '/../templates/admin/dashboard.php';
+    $html = ob_get_clean();
+    $response->getBody()->write($html);
+    return $response;
+});
+
+$app->get('/admin/visitors', function ($request, $response) {
+    $check = requireAdmin($response);
+    if ($check) return $check;
+
+    require_once __DIR__ . '/../src/VisitorTracker.php';
+
+    $db = Database::getConnection();
+    $tracker = new VisitorTracker($db);
+
+    $visitors = $tracker->getAllVisitors(500);
+    $stats = $tracker->getStats();
+
+    ob_start();
+    require __DIR__ . '/../templates/admin/visitors.php';
+    $html = ob_get_clean();
+    $response->getBody()->write($html);
+    return $response;
+});
+
+$app->get('/admin/users', function ($request, $response) {
+    $check = requireAdmin($response);
+    if ($check) return $check;
+
+    $db = Database::getConnection();
+    $stmt = $db->query("SELECT id, email, is_active, created_at FROM users ORDER BY created_at DESC");
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    ob_start();
+    require __DIR__ . '/../templates/admin/users.php';
+    $html = ob_get_clean();
+    $response->getBody()->write($html);
+    return $response;
+});
+
+$app->get('/admin/weather-data', function ($request, $response) {
+    $check = requireAdmin($response);
+    if ($check) return $check;
+
+    $db = Database::getConnection();
+    $stmt = $db->query("
+        SELECT wd.*, c.city_name 
+        FROM weather_data wd 
+        JOIN cities c ON wd.city_id = c.id 
+        ORDER BY wd.dt DESC 
+        LIMIT 1000
+    ");
+    $weatherData = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    ob_start();
+    require __DIR__ . '/../templates/admin/weather-data.php';
+    $html = ob_get_clean();
+    $response->getBody()->write($html);
+    return $response;
+});
+
+$app->post('/api/login', function ($request, $response) {
+    try {
+        $params = $request->getParsedBody();
+        $email = $params['email'] ?? '';
+        $password = $params['password'] ?? '';
+
+        if (!$email || !$password) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'Email and password required'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        $db = Database::getConnection();
+        $stmt = $db->prepare("SELECT * FROM users WHERE email = ? AND is_active = 1");
+        $stmt->execute([$email]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($user && password_verify($password, $user['password'])) {
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['email'] = $user['email'];
+
+            $response->getBody()->write(json_encode([
+                'success' => true,
+                'message' => 'Login successful',
+                'user' => [
+                    'id' => $user['id'],
+                    'email' => $user['email']
+                ],
+                'session_id' => session_id()
+            ]));
+
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(200);
+        }
+
+        $response->getBody()->write(json_encode([
+            'success' => false,
+            'error' => 'Invalid email or password'
+        ]));
+
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(401);
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
+$app->post('/api/register', function ($request, $response) {
+    try {
+        $params = $request->getParsedBody();
+        $email = filter_var($params['email'], FILTER_SANITIZE_EMAIL);
+        $password = $params['password'] ?? '';
+
+        if (!$email || !$password) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'Email and password required'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
+        $activationCode = bin2hex(random_bytes(16));
+
+        $db = Database::getConnection();
+
+        $check = $db->prepare("SELECT id FROM users WHERE email = ?");
+        $check->execute([$email]);
+        if ($check->fetch()) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'Email already exists'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(409);
+        }
+
+        $stmt = $db->prepare("INSERT INTO users (email, password, activation_code, is_active) VALUES (?, ?, ?, 0)");
+
+        if ($stmt->execute([$email, $hashedPassword, $activationCode])) {
+            $response->getBody()->write(json_encode([
+                'success' => true,
+                'message' => 'Registration successful. Please activate your account via email.',
+                'activation_required' => true
+            ]));
+
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(201);
+        }
+
+        $response->getBody()->write(json_encode([
+            'success' => false,
+            'error' => 'Registration failed'
+        ]));
+
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
+$app->post('/api/logout', function ($request, $response) {
+    $_SESSION = array();
+
+    if (session_id() != "" || isset($_COOKIE[session_name()])) {
+        setcookie(session_name(), '', time() - 2592000, '/');
+    }
+    session_destroy();
+
+    $response->getBody()->write(json_encode([
+        'success' => true,
+        'message' => 'Logged out successfully'
+    ]));
+
+    return $response->withHeader('Content-Type', 'application/json');
+});
+
+$app->delete('/api/favorite/{id}', function ($request, $response, $args) {
+    try {
+        $cityId = $args['id'] ?? null;
+        $userId = $_SESSION['user_id'] ?? null;
+
+        if (!$userId) {
+            $response->getBody()->write(json_encode(['success' => false, 'error' => 'Not logged in']));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(401);
+        }
+
+        if (!$cityId) {
+            $response->getBody()->write(json_encode(['success' => false, 'error' => 'City ID required']));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        $db = Database::getConnection();
+        $stmt = $db->prepare("DELETE FROM favorite_cities WHERE user_id = ? AND city_id = ?");
+        $stmt->execute([$userId, $cityId]);
+
+        if ($stmt->rowCount() > 0) {
+            $response->getBody()->write(json_encode([
+                'success' => true,
+                'message' => 'Favorite removed successfully'
+            ]));
+        } else {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'message' => 'Favorite not found'
+            ]));
+        }
+
+        return $response->withHeader('Content-Type', 'application/json');
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode(['success' => false, 'error' => $e->getMessage()]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
 
 $app->run();

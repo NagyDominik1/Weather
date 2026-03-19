@@ -1,43 +1,6 @@
 <?php
 include __DIR__ . '/lang.php';
-
-// Összehasonlítás adatok (ha van keresés)
-$compareData = [];
-$cities = [];
-$error = null;
-
-if (!empty($_GET['city1']) || !empty($_GET['city2']) || !empty($_GET['city3'])) {
-    require_once __DIR__ . '/../src/Database.php';
-    require_once __DIR__ . '/../src/WeatherService.php';
-
-    $db = Database::getConnection();
-    $service = new WeatherService($db);
-
-    $cityNames = array_filter([
-            $_GET['city1'] ?? '',
-            $_GET['city2'] ?? '',
-            $_GET['city3'] ?? ''
-    ]);
-
-    foreach ($cityNames as $cityName) {
-        try {
-            $result = $service->fetchAndSaveWeatherByCityName(trim($cityName));
-            $compareData[] = [
-                    'name' => $result['api_data']['name'],
-                    'temp' => $result['api_data']['main']['temp'],
-                    'feels_like' => $result['api_data']['main']['feels_like'],
-                    'humidity' => $result['api_data']['main']['humidity'],
-                    'wind_speed' => $result['api_data']['wind']['speed'],
-                    'pressure' => $result['api_data']['main']['pressure'],
-                    'description' => $result['api_data']['weather'][0]['description'],
-                    'icon' => $result['api_data']['weather'][0]['icon']
-            ];
-            $cities[] = $result['api_data']['name'];
-        } catch (Exception $e) {
-            $error = "Hiba a város lekérésekor: " . htmlspecialchars($cityName);
-        }
-    }
-}
+// $compareData és $error már át van adva az index.php-ból!
 ?>
 <!DOCTYPE html>
 <html lang="<?= $lang ?>">
@@ -63,7 +26,7 @@ if (!empty($_GET['city1']) || !empty($_GET['city2']) || !empty($_GET['city3'])) 
         <p class="text-slate-500 italic text-sm md:text-base"><?= t('compare_subtitle') ?></p>
     </header>
 
-    <?php if ($error): ?>
+    <?php if (!empty($error)): ?>
         <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-2xl mb-6">
             <p class="font-bold"><i class="fa-solid fa-exclamation-triangle mr-2"></i><?= $error ?></p>
         </div>
@@ -149,7 +112,8 @@ if (!empty($_GET['city1']) || !empty($_GET['city2']) || !empty($_GET['city3'])) 
                                 <div class="flex flex-col items-center gap-2">
                                     <span class="text-xl md:text-2xl font-black text-slate-900"><?= $city['humidity'] ?>%</span>
                                     <div class="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                        <div class="bg-blue-500 h-full" style="width: <?= $city['humidity'] ?>%"></div>
+                                        <?php $width = $city['humidity']; ?>
+                                        <div class="bg-blue-500 h-full" style="width: <?php echo $width; ?>%"></div>
                                     </div>
                                 </div>
                             </td>
