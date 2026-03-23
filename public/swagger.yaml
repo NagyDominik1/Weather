@@ -8,6 +8,7 @@ info:
     - Felhasználó autentikáció (login, register, logout)
     - Időjárás lekérés városokra
     - Kedvenc városok kezelése (CRUD)
+    - Felhasználói profil frissítés (UPDATE)
     
     ## Autentikáció
     A legtöbb endpoint session-alapú autentikációt használ. 
@@ -31,6 +32,8 @@ tags:
     description: Időjárás lekérés
   - name: Favorites
     description: Kedvenc városok kezelése
+  - name: User
+    description: Felhasználói profil kezelés
 
 paths:
   /api/login:
@@ -411,6 +414,121 @@ paths:
                     example: Favorite removed successfully
         '401':
           description: Nincs bejelentkezve
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/user/profile:
+    put:
+      tags:
+        - User
+      summary: Profil frissítés
+      description: Felhasználó email címének módosítása (jelszó ellenőrzéssel)
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - current_password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: newemail@example.com
+                current_password:
+                  type: string
+                  format: password
+                  example: mypassword123
+      responses:
+        '200':
+          description: Profil sikeresen frissítve
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Profile updated successfully
+                  email:
+                    type: string
+                    example: newemail@example.com
+        '400':
+          description: Hiányzó vagy hibás adatok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Nincs bejelentkezve vagy hibás jelszó
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Email már foglalt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/user/password:
+    patch:
+      tags:
+        - User
+      summary: Jelszó frissítés
+      description: Felhasználó jelszavának módosítása (jelenlegi jelszó ellenőrzéssel)
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - current_password
+                - new_password
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                  example: oldpassword123
+                new_password:
+                  type: string
+                  format: password
+                  example: newpassword456
+      responses:
+        '200':
+          description: Jelszó sikeresen módosítva
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Password updated successfully
+        '400':
+          description: Hiányzó vagy hibás adatok (pl. új jelszó túl rövid)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Nincs bejelentkezve vagy hibás jelenlegi jelszó
           content:
             application/json:
               schema:

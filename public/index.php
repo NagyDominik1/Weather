@@ -1169,4 +1169,184 @@ $app->delete('/api/favorite/{id}', function ($request, $response, $args) {
     }
 });
 
+// ========== API: UPDATE USER PROFILE (PUT) ==========
+$app->put('/api/user/profile', function ($request, $response) {
+    try {
+        $userId = $_SESSION['user_id'] ?? null;
+
+        if (!$userId) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'Not logged in'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(401);
+        }
+
+        $params = $request->getParsedBody();
+        $newEmail = filter_var($params['email'] ?? '', FILTER_SANITIZE_EMAIL);
+        $currentPassword = $params['current_password'] ?? null;
+
+        // Email frissítés csak jelszó ellenőrzéssel
+        if (!empty($newEmail)) {
+            if (!$currentPassword) {
+                $response->getBody()->write(json_encode([
+                    'success' => false,
+                    'error' => 'Current password required for email change'
+                ]));
+                return $response
+                    ->withHeader('Content-Type', 'application/json')
+                    ->withStatus(400);
+            }
+
+            $db = Database::getConnection();
+
+            // Jelszó ellenőrzés
+            $stmt = $db->prepare("SELECT password FROM users WHERE id = ?");
+            $stmt->execute([$userId]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$user || !password_verify($currentPassword, $user['password'])) {
+                $response->getBody()->write(json_encode([
+                    'success' => false,
+                    'error' => 'Invalid password'
+                ]));
+                return $response
+                    ->withHeader('Content-Type', 'application/json')
+                    ->withStatus(401);
+            }
+
+            // Email foglaltság ellenőrzése
+            $checkStmt = $db->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
+            $checkStmt->execute([$newEmail, $userId]);
+
+            if ($checkStmt->fetch()) {
+                $response->getBody()->write(json_encode([
+                    'success' => false,
+                    'error' => 'Email already exists'
+                ]));
+                return $response
+                    ->withHeader('Content-Type', 'application/json')
+                    ->withStatus(409);
+            }
+
+            // Email frissítés
+            $updateStmt = $db->prepare("UPDATE users SET email = ? WHERE id = ?");
+            $updateStmt->execute([$newEmail, $userId]);
+
+            $_SESSION['email'] = $newEmail;
+
+            $response->getBody()->write(json_encode([
+                'success' => true,
+                'message' => 'Profile updated successfully',
+                'email' => $newEmail
+            ]));
+
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(200);
+        }
+
+        $response->getBody()->write(json_encode([
+            'success' => false,
+            'error' => 'No fields to update'
+        ]));
+
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(400);
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
+// ========== API: UPDATE PASSWORD (PATCH) ==========
+$app->patch('/api/user/password', function ($request, $response) {
+    try {
+        $userId = $_SESSION['user_id'] ?? null;
+
+        if (!$userId) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'Not logged in'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(401);
+        }
+
+        $params = $request->getParsedBody();
+        $currentPassword = $params['current_password'] ?? '';
+        $newPassword = $params['new_password'] ?? '';
+
+        if (!$currentPassword || !$newPassword) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'Current password and new password required'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        if (strlen($newPassword) < 6) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'New password must be at least 6 characters'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(400);
+        }
+
+        $db = Database::getConnection();
+
+        // Jelenlegi jelszó ellenőrzés
+        $stmt = $db->prepare("SELECT password FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user || !password_verify($currentPassword, $user['password'])) {
+            $response->getBody()->write(json_encode([
+                'success' => false,
+                'error' => 'Invalid current password'
+            ]));
+            return $response
+                ->withHeader('Content-Type', 'application/json')
+                ->withStatus(401);
+        }
+
+        // Jelszó frissítés
+        $hashedPassword = password_hash($newPassword, PASSWORD_BCRYPT);
+        $updateStmt = $db->prepare("UPDATE users SET password = ? WHERE id = ?");
+        $updateStmt->execute([$hashedPassword, $userId]);
+
+        $response->getBody()->write(json_encode([
+            'success' => true,
+            'message' => 'Password updated successfully'
+        ]));
+
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(200);
+
+    } catch (Exception $e) {
+        $response->getBody()->write(json_encode([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(500);
+    }
+});
+
 $app->run();
